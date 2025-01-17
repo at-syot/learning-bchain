@@ -19,22 +19,30 @@ impl Transaction {
 }
 
 #[derive(Debug, Serialize)]
-struct Block {
+struct BlockHeader {
     time_stamp: i64,
     prev_hash: String,
     height: u64,
     nonce: u64,
+}
+
+#[derive(Debug, Serialize)]
+struct Block {
+    header: BlockHeader,
     transactions: Vec<Transaction>,
 }
 
 impl Block {
     pub fn new(prev_hash: String, nonce: u64, height: u64, transactions: Vec<Transaction>) -> Self {
-        Block {
+        let header = BlockHeader {
             prev_hash,
             time_stamp: Utc::now().timestamp(),
             height,
             nonce,
+        };
+        Block {
             transactions,
+            header,
         }
     }
 
@@ -68,7 +76,7 @@ impl BlockChain {
         );
         self.chain.push(new_block);
 
-        // clear transaction_pool
+        // empty the transaction_pool
         self.transaction_pool = vec![];
 
         self.chain.last()
@@ -102,6 +110,7 @@ impl BlockChain {
 fn main() {
     let mut bc = BlockChain::new();
     bc.add_transaction("A".into(), "B".into(), 100);
+    bc.add_transaction("C".into(), "D".into(), 101);
     bc.inspect();
     bc.create_block(bc.latest_block().unwrap().hash().unwrap(), 1);
     bc.inspect();
