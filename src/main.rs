@@ -47,9 +47,11 @@ impl Block {
     }
 
     pub fn hash(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string(self).map(sha256::digest)
+        serde_json::to_string(&self.header).map(sha256::digest)
     }
 }
+
+const DIFFICULTY: u8 = 3;
 
 #[derive(Debug)]
 struct BlockChain {
@@ -97,22 +99,50 @@ impl BlockChain {
         self.transaction_pool.last()
     }
 
+    pub fn valid_proof(&self, adding_block: &Block) -> bool {
+        match adding_block
+            .hash()
+            .map(|hash| hash.chars().take(DIFFICULTY as usize).all(|c| c == '0'))
+        {
+            Ok(valid) => valid,
+            Err(_) => false,
+        }
+    }
+
+    pub fn proof_of_work(&self) -> u64 {
+        // challenge(future nonce) + prev_hash + transactions(pool)
+        let mut nonce = 0;
+        loop {
+            let prev_hash = self.latest_block().unwrap().hash().unwrap();
+            let transactions = self.transaction_pool.to_vec();
+            let adding_block = Block::new(prev_hash, nonce, 0, transactions);
+            if self.valid_proof(&adding_block) {
+                break;
+            }
+            nonce += 1;
+        }
+        nonce
+    }
+
     pub fn inspect(&self) {
         for (i, block) in self.chain.iter().enumerate() {
             println!("{} Block {} {}", "#".repeat(25), i, "#".repeat(25));
             println!("-> {:?}", block);
             println!("-> {:?}", self.transaction_pool);
-            println!("{}", "*".repeat(30))
+            println!("{}", "*".repeat(30));
+            println!("\n\n");
         }
     }
 }
 
 fn main() {
     let mut bc = BlockChain::new();
+    bc.inspect();
+
     bc.add_transaction("A".into(), "B".into(), 100);
     bc.add_transaction("C".into(), "D".into(), 101);
-    bc.inspect();
-    bc.create_block(bc.latest_block().unwrap().hash().unwrap(), 1);
+    let next_block_nonce = bc.proof_of_work();
+    bc.create_block(bc.latest_block().unwrap().hash().unwrap(), next_block_nonce);
     bc.inspect();
 
     bc.create_block(bc.latest_block().unwrap().hash().unwrap(), 2);
