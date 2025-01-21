@@ -2,14 +2,17 @@ mod core;
 use core::block_chain::BlockChain;
 
 fn main() {
+    let minner_address = Some(String::from("minner"));
     let mut bc = BlockChain::new();
+    bc.block_chain_address = minner_address;
     bc.inspect();
 
-    bc.add_transaction("A".into(), "B".into(), 100);
-    bc.add_transaction("C".into(), "D".into(), 101);
-    let next_block_nonce = bc.proof_of_work();
-    bc.create_block(bc.latest_block().unwrap().hash().unwrap(), next_block_nonce);
+    bc.add_transaction("A".into(), "B".into(), 2.0);
+    bc.add_transaction("C".into(), "D".into(), 3.0);
+    bc.minning();
     bc.inspect();
 
-    bc.create_block(bc.latest_block().unwrap().hash().unwrap(), 2);
+    bc.add_transaction("Me".into(), "Mom".into(), 1.0);
+    bc.minning();
+    bc.inspect();
 }

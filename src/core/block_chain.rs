@@ -2,11 +2,14 @@ use super::block::Block;
 use super::transaction::Transaction;
 
 const DIFFICULTY: u8 = 3;
+const MINNING_SENDER: &'static str = "blockchain";
+const MINNING_REWARD: f64 = 1.0;
 
 #[derive(Debug)]
 pub struct BlockChain {
     pub transaction_pool: Vec<Transaction>,
     pub chain: Vec<Block>, // should be ref with lifetime specified
+    pub block_chain_address: Option<String>,
 }
 
 impl BlockChain {
@@ -16,6 +19,7 @@ impl BlockChain {
         BlockChain {
             chain: vec![b],
             transaction_pool: vec![],
+            block_chain_address: None,
         }
     }
 
@@ -42,7 +46,7 @@ impl BlockChain {
         &mut self,
         sender_addr: String,
         recipient_addr: String,
-        value: u64,
+        value: f64,
     ) -> Option<&Transaction> {
         let tx = Transaction::new(sender_addr, recipient_addr, value);
         self.transaction_pool.push(tx);
@@ -65,7 +69,8 @@ impl BlockChain {
         loop {
             let prev_hash = self.latest_block().unwrap().hash().unwrap();
             let transactions = self.transaction_pool.to_vec();
-            let adding_block = Block::new(prev_hash, nonce, 0, transactions);
+            let block_height = self.chain.len();
+            let adding_block = Block::new(prev_hash, nonce, block_height as u64, transactions);
             if self.valid_proof(&adding_block) {
                 break;
             }
@@ -74,7 +79,21 @@ impl BlockChain {
         nonce
     }
 
+    pub fn minning(&mut self) {
+        self.add_transaction(
+            MINNING_SENDER.into(),
+            self.block_chain_address.as_ref().unwrap().clone(),
+            MINNING_REWARD,
+        );
+
+        let prev_hash = self.latest_block().unwrap().hash().unwrap();
+        let nonce = self.proof_of_work();
+        self.create_block(prev_hash, nonce);
+        println!("action=minning status=success");
+    }
+
     pub fn inspect(&self) {
+        println!("BlockChain {:?}", self);
         for (i, block) in self.chain.iter().enumerate() {
             println!("{} Block {} {}", "#".repeat(25), i, "#".repeat(25));
             println!("-> {:?}", block);

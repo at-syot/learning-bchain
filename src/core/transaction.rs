@@ -4,11 +4,11 @@ use serde::Serialize;
 pub struct Transaction {
     sender_addr: String,
     recipient_addr: String,
-    value: u64,
+    value: f64,
 }
 
 impl Transaction {
-    pub fn new(sender_addr: String, recipient_addr: String, value: u64) -> Self {
+    pub fn new(sender_addr: String, recipient_addr: String, value: f64) -> Self {
         Transaction {
             sender_addr,
             recipient_addr,

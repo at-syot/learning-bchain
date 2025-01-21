@@ -3,7 +3,7 @@ use chrono::Utc;
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
-struct BlockHeader {
+pub struct BlockHeader {
     time_stamp: i64,
     prev_hash: String,
     height: u64,
