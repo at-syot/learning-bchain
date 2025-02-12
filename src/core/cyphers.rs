@@ -13,14 +13,21 @@ pub trait Decoder {
 }
 
 pub struct PrivateKey {
-    key_bytes: Vec<u8>,
+    key_bytes: [u8; 32],
 }
 
 impl PrivateKey {
-    pub fn generate() -> Self {
+    pub fn generate() -> Result<Self, String> {
         let pk = SecretKey::random(&mut OsRng);
-        Self {
-            key_bytes: pk.to_bytes().to_vec(),
+        let pk_bytes: Result<[u8; 32], String> = pk
+            .to_bytes()
+            .to_vec()
+            .try_into()
+            .map_err(|_| "private_key bytes size should equal to 32".into());
+
+        match pk_bytes {
+            Ok(key_bytes) => Ok(Self { key_bytes }),
+            Err(e) => Err(e),
         }
     }
 
@@ -29,7 +36,7 @@ impl PrivateKey {
     }
 
     pub fn sign(&self, data: &[u8]) -> Result<Signature, EcdsaErr> {
-        let signing_key = SigningKey::from_slice(&self.as_bytes());
+        let signing_key = SigningKey::from_slice(self.as_bytes());
         if let Ok(sk) = signing_key {
             let signature = sk.sign(data);
             return Ok(Signature { signature });
@@ -38,7 +45,7 @@ impl PrivateKey {
         Err(signing_key.unwrap_err())
     }
 
-    pub fn as_bytes(&self) -> &Vec<u8> {
+    pub fn as_bytes(&self) -> &[u8; 32] {
         &self.key_bytes
     }
 
@@ -54,7 +61,7 @@ pub struct PublicKey {
 impl PublicKey {
     pub fn from(private_key: &PrivateKey) -> Self {
         let pk_bytes = private_key.as_bytes();
-        let public_key_bytes = SecretKey::from_slice(&pk_bytes)
+        let public_key_bytes = SecretKey::from_slice(pk_bytes)
             .unwrap() // ignore err
             .public_key()
             .to_sec1_bytes()
@@ -72,6 +79,14 @@ impl PublicKey {
         }
 
         verifying_key.unwrap().verify(&data, &signature.signature)
+    }
+
+    pub fn as_bytes(&self) -> Vec<u8> {
+        self.key_bytes.clone()
+    }
+
+    pub fn as_hex(&self) -> String {
+        hex::encode(&self.key_bytes)
     }
 }
 
@@ -95,8 +110,7 @@ fn sign_block() {
     let b = Block::new("prev_hash".into(), 0, 0, vec![]);
     let encoded_b = &b.encode().unwrap();
 
-    let private_key = PrivateKey::generate();
-    // let signature = KeysPair::sign(hex_private.as_ref(), &encoded_b).unwrap();
+    let private_key = PrivateKey::generate().unwrap();
     let signature = private_key.sign(&encoded_b).unwrap();
     assert_eq!(signature.as_bytes().is_empty(), false);
 
