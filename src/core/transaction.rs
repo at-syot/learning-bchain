@@ -1,3 +1,4 @@
+use super::cyphers::Encoder;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Clone, Deserialize)]
@@ -14,5 +15,11 @@ impl Transaction {
             recipient_addr,
             value,
         }
+    }
+}
+
+impl Encoder for Transaction {
+    fn encode(&self) -> Result<Vec<u8>, String> {
+        bincode::serialize(self).map_err(|e| e.to_string())
     }
 }
