@@ -1,5 +1,5 @@
 // use core::block_chain::BlockChain;
-use tokio::{io::{AsyncReadExt}, net::{TcpListener, TcpStream}};
+use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}};
 use tokio::io::BufReader;
 use std::{sync::{Arc, Mutex}};
 use std::collections::HashMap;
@@ -25,16 +25,16 @@ async fn main() {
     println!("server starting on port: 8080");
 
     loop {
-        let db = db.clone(); 
+        let db = Arc::clone(&db); 
         let (mut socket, _) = listener.accept().await.unwrap();
 
         tokio::spawn(async move {
-            process(&mut socket).await;
+            process(&mut socket, db).await;
         });
     }
 }
 
-async fn process(socket: &mut TcpStream) {
+async fn process(socket: &mut TcpStream, db: Arc<Mutex<HashMap<String, String>>>) {
     let socket_addr = socket.peer_addr().unwrap();
     let client_ip = socket_addr.ip().to_string();
 
@@ -59,11 +59,13 @@ async fn process(socket: &mut TcpStream) {
     }
 
     println!("command: M: {}, K: {}, Value: {}", method, key, value);
+    let mut db = db.lock().unwrap();
+    if method == "GET" {
+        let got = db.get(key);
+        println!("got {:?}", got);
+        return;
+    }
 
-    // let msg = format!("Hello: {}", client_ip);
-    // println!("writing to client {}", client_ip);
-    // if let Err(e) = socket.write_all(msg.as_bytes()).await {
-    //     eprintln!("fail to write to socket; err = {:?}", e);
-    //     return;
-    // }
+    db.insert(key.into(), value.into());
+    println!("save key: {}, value: {} - success!", key, value)
 }
