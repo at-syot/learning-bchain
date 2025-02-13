@@ -1,11 +1,16 @@
-// use core::block_chain::BlockChain;
-use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::{TcpListener, TcpStream}};
-use tokio::io::BufReader;
-use std::{sync::{Arc, Mutex}};
-use std::collections::HashMap;
+#![allow(unused_must_use, dead_code)]
 
-#[tokio::main]
-async fn main() {
+// use core::block_chain::BlockChain;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex};
+use tokio::io::BufReader;
+use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    io::{AsyncReadExt, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
+};
+
+fn old_main() {
     // let minner_address = Some(String::from("minner"));
     // let mut bc = BlockChain::new();
     // bc.block_chain_address = minner_address;
@@ -19,18 +24,66 @@ async fn main() {
     // bc.add_transaction("Me".into(), "Mom".into(), 1.0);
     // bc.minning();
     // bc.inspect();
+}
 
+#[tokio::main]
+async fn main() {
     let db: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
-    let listener = TcpListener::bind("127.0.0.1:8080").await.unwrap();
-    println!("server starting on port: 8080");
+    db.lock()
+        .unwrap()
+        .insert("foo".to_string(), "1".to_string());
 
-    loop {
-        let db = Arc::clone(&db); 
-        let (mut socket, _) = listener.accept().await.unwrap();
+    let server_addr = "127.0.0.1:8080";
+    let listener = TcpListener::bind(server_addr).await.unwrap();
+    let listener_arc = Arc::new(listener);
 
-        tokio::spawn(async move {
-            process(&mut socket, db).await;
-        });
+    let (tx, mut rx) = mpsc::channel(32);
+    let listener_joinhandle = tokio::spawn(async move {
+        loop {
+            tokio::select! {
+                biased;
+                _ = rx.recv() => {
+                  eprintln!(
+                      "final db's value: {:?}",
+                      db.clone().lock().unwrap().get("foo".into()).unwrap()
+                  );
+                  break;
+                },
+                result = listener_arc.accept() => {
+                    match result {
+                        Ok((mut socket, _)) => {
+                            let db = db.clone();
+                            tokio::spawn(async move {
+                                process(&mut socket, db).await;
+                            });
+                        }
+                        Err(e) => eprintln!("Error accepting connection: {}", e),
+                    }
+                }
+            }
+        }
+    });
+
+    let client_joinhandle = tokio::spawn(async move {
+        for _ in 0..1000 {
+            let mut socket = TcpStream::connect(server_addr).await.unwrap();
+            let command = String::from("INC foo");
+            if let Err(e) = socket.write_all(command.as_bytes()).await {
+                eprintln!("Error sending command: {}", e);
+            }
+        }
+    });
+
+    match client_joinhandle.await {
+        Err(e) => eprintln!("unable to join main thread: {:?}", e),
+        Ok(_) => {
+            println!("after joined");
+            std::thread::sleep(std::time::Duration::from_secs(1));
+            if let Err(e) = tx.send(()).await {
+                eprintln!("unable to stop the cleint {}", e);
+            }
+            println!("client gracfully stopped.")
+        }
     }
 }
 
@@ -58,14 +111,20 @@ async fn process(socket: &mut TcpStream, db: Arc<Mutex<HashMap<String, String>>>
         value = com_iter.next().unwrap();
     }
 
-    println!("command: M: {}, K: {}, Value: {}", method, key, value);
+    // println!("command: M: {}, K: {}, Value: {}", method, key, value);
     let mut db = db.lock().unwrap();
     if method == "GET" {
-        let got = db.get(key);
-        println!("got {:?}", got);
+        if let Some(v) = db.get(key) {
+            println!("retrived value: {:?}", v);
+            socket.write_all(v.clone().as_bytes());
+        }
+        socket.write_u8(0);
         return;
     }
 
-    db.insert(key.into(), value.into());
-    println!("save key: {}, value: {} - success!", key, value)
+    let old_v = db.get(key.into()).unwrap();
+    let old_u8: i32 = old_v.parse().unwrap();
+    let next_v = old_u8 + 1;
+    db.insert(key.to_string(), next_v.to_string());
+    // println!("save key: {}, value: {} - success!", key, next_v);
 }
