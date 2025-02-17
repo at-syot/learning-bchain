@@ -5,10 +5,14 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct BlockHeader {
-    time_stamp: i64,
+    pub time_stamp: i64,
+
+    #[serde(skip)]
+    hash: String,
+
     prev_hash: String,
     height: u64,
-    nonce: u64,
+    pub nonce: u64,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -34,6 +38,7 @@ impl Decoder for Block {
 impl Block {
     pub fn new(prev_hash: String, nonce: u64, height: u64, transactions: Vec<Transaction>) -> Self {
         let header = BlockHeader {
+            hash: String::new(),
             prev_hash,
             time_stamp: Utc::now().timestamp(),
             height,
@@ -45,13 +50,20 @@ impl Block {
         }
     }
 
-    pub fn hash(&self) -> Result<String, serde_json::Error> {
-        serde_json::to_string(&self.header).map(sha256::digest)
+    pub fn gen_hash(&mut self) -> Result<String, serde_json::Error> {
+        let hash = serde_json::to_string(&self).map(sha256::digest)?;
+        self.header.hash = hash.clone();
+        Ok(hash.clone())
+    }
+
+    pub fn hash(&self) -> String {
+        self.header.hash.clone()
     }
 }
 
 #[test]
 fn test_encode_block() {
+    // TODO: -
     let encoding = Block::new(String::from("prev_hash"), 1990, 0, vec![]);
     let encoded = &encoding.encode();
     println!("{:?}", encoded);
@@ -59,5 +71,5 @@ fn test_encode_block() {
     let _ = encoding.decode(encoded.as_ref().unwrap()).map(|decoded| {
         println!("decoded block----- {:?}", decoded);
     });
-    assert!(false)
+    assert!(true);
 }

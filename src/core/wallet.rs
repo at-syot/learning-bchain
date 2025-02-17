@@ -18,7 +18,7 @@ impl Wallet {
 
         // generate address: !keep simple! -- first 20 of public bytes
         // address can follow bitcoin or ETH : will be impl
-        let address = hex::encode(&public_key.as_bytes().to_vec()[0..20]);
+        let address = hex::encode(&public_key.as_bytes()[0..20]);
         Ok(Self {
             data,
             address,
