@@ -55,15 +55,6 @@ impl PrivateKey {
     }
 }
 
-#[test]
-fn test_pk() {
-    if let Ok(pk) = PrivateKey::generate() {
-        eprintln!("pk bytes: {:?}, hex: {}", pk.key_bytes, pk.as_hex());
-    };
-
-    assert!(false);
-}
-
 #[derive(Debug)]
 pub struct PublicKey {
     key_bytes: Vec<u8>,
@@ -138,6 +129,8 @@ impl<'de> serde::de::Visitor<'de> for SignatureVisitor {
             .map(|sig| Signature { signature: sig })
             .map_err(|e| E::custom(""))
     }
+
+    // Remark: maybe able to deserialize json, in-case serde::json
 }
 
 impl<'de> serde::Deserialize<'de> for Signature {
@@ -169,16 +162,24 @@ fn serd_signature() {
     let signature = private_key.sign(&encoded_b).unwrap();
 
     let ser = bincode::serialize(&signature).unwrap();
-    dbg!(&ser);
     let de: Signature = bincode::deserialize(ser.as_slice()).unwrap();
-    dbg!(&de);
 
-    eprintln!("again {:?}", bincode::serialize(&de));
+    let last3_ser = &ser[ser.len() - 3..ser.len()];
+    let last3_after_ser: &Vec<u8> = &bincode::serialize(&de)
+        .unwrap()
+        .into_iter()
+        .rev()
+        .take(3)
+        .rev()
+        .collect();
 
-    // last 5 bytes, should all match.
-    // check, after serd signature is the same
+    // assert: last 3 bytes, should all match.
+    assert!(last3_ser == last3_after_ser);
 
-    assert!(false)
+    // assert: after serd signature is the same
+    let pubk = private_key.public_key();
+    let is_valid = pubk.verify(&de, &encoded_b);
+    assert!(is_valid.is_ok())
 }
 
 #[test]
