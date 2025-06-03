@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 pub struct BlockHeader {
     pub time_stamp: i64,
 
-    #[serde(skip)]
+    #[serde(skip_serializing)]
     hash: String,
 
     prev_hash: String,

@@ -139,6 +139,4 @@ fn test_is_valid() {
     bc.block_nth(1).unwrap().header.nonce = 90;
     println!("\n\n-----------\n\n");
     assert_eq!(&bc.is_valid(), &false);
-
-    // assert!(false)
 }

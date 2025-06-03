@@ -12,6 +12,7 @@ pub trait Decoder {
     fn decode(&self, encoded: &Vec<u8>) -> Result<Box<Self>, String>;
 }
 
+#[derive(Debug)]
 pub struct PrivateKey {
     key_bytes: [u8; 32],
 }
@@ -54,6 +55,16 @@ impl PrivateKey {
     }
 }
 
+#[test]
+fn test_pk() {
+    if let Ok(pk) = PrivateKey::generate() {
+        eprintln!("pk bytes: {:?}, hex: {}", pk.key_bytes, pk.as_hex());
+    };
+
+    assert!(false);
+}
+
+#[derive(Debug)]
 pub struct PublicKey {
     key_bytes: Vec<u8>,
 }
@@ -90,8 +101,52 @@ impl PublicKey {
     }
 }
 
+// TODO: impl custom serialize & deserialize for Signature
+// because Block { Trxs: Vec<Trx { -> singature <- }> }; Block is serd!
+#[derive(Debug, Clone)]
 pub struct Signature {
     signature: EcdsaSignature,
+}
+
+impl serde::Serialize for Signature {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        use core::ops::Deref;
+        // use serde::ser::Error;
+
+        let sig_bytes = self.signature.to_bytes();
+        let sig_bytes = sig_bytes.deref();
+        dbg!(sig_bytes);
+        serializer.serialize_bytes(sig_bytes)
+    }
+}
+
+struct SignatureVisitor;
+impl<'de> serde::de::Visitor<'de> for SignatureVisitor {
+    type Value = Signature;
+    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        formatter.write_str("")
+    }
+
+    fn visit_bytes<E>(self, v: &[u8]) -> Result<Self::Value, E>
+    where
+        E: serde::de::Error,
+    {
+        EcdsaSignature::from_slice(v)
+            .map(|sig| Signature { signature: sig })
+            .map_err(|e| E::custom(""))
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Signature {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        deserializer.deserialize_bytes(SignatureVisitor)
+    }
 }
 
 impl Signature {
@@ -102,6 +157,28 @@ impl Signature {
     pub fn as_hex(&self) -> String {
         hex::encode(self.signature.to_der().to_bytes())
     }
+}
+
+#[test]
+fn serd_signature() {
+    use super::block::Block;
+    let b = Block::new("prev_hash".into(), 0, 0, vec![]);
+    let encoded_b = &b.encode().unwrap();
+
+    let private_key = PrivateKey::generate().unwrap();
+    let signature = private_key.sign(&encoded_b).unwrap();
+
+    let ser = bincode::serialize(&signature).unwrap();
+    dbg!(&ser);
+    let de: Signature = bincode::deserialize(ser.as_slice()).unwrap();
+    dbg!(&de);
+
+    eprintln!("again {:?}", bincode::serialize(&de));
+
+    // last 5 bytes, should all match.
+    // check, after serd signature is the same
+
+    assert!(false)
 }
 
 #[test]
