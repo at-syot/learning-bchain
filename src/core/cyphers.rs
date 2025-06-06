@@ -1,6 +1,6 @@
 use k256::ecdsa::signature::{Signer, Verifier};
 use k256::ecdsa::Error as EcdsaErr;
-use k256::ecdsa::{Signature as EcdsaSignature, SigningKey, VerifyingKey};
+use k256::ecdsa::{RecoveryId, Signature as EcdsaSignature, SigningKey, VerifyingKey};
 use k256::elliptic_curve::rand_core::OsRng;
 use k256::SecretKey;
 
@@ -37,13 +37,10 @@ impl PrivateKey {
     }
 
     pub fn sign(&self, data: &[u8]) -> Result<Signature, EcdsaErr> {
-        let signing_key = SigningKey::from_slice(self.as_bytes());
-        if let Ok(sk) = signing_key {
-            let signature = sk.sign(data);
-            return Ok(Signature { signature });
-        }
+        let signing_key = SigningKey::from_slice(self.as_bytes())?;
+        let signature = signing_key.sign(data);
 
-        Err(signing_key.unwrap_err())
+        Ok(Signature { inner: signature })
     }
 
     pub fn as_bytes(&self) -> &[u8; 32] {
@@ -80,7 +77,7 @@ impl PublicKey {
             return Err(e);
         }
 
-        verifying_key.unwrap().verify(&data, &signature.signature)
+        verifying_key.unwrap().verify(&data, &signature.inner)
     }
 
     pub fn as_bytes(&self) -> Vec<u8> {
@@ -92,11 +89,9 @@ impl PublicKey {
     }
 }
 
-// TODO: impl custom serialize & deserialize for Signature
-// because Block { Trxs: Vec<Trx { -> singature <- }> }; Block is serd!
 #[derive(Debug, Clone)]
 pub struct Signature {
-    signature: EcdsaSignature,
+    inner: EcdsaSignature,
 }
 
 impl serde::Serialize for Signature {
@@ -107,7 +102,7 @@ impl serde::Serialize for Signature {
         use core::ops::Deref;
         // use serde::ser::Error;
 
-        let sig_bytes = self.signature.to_bytes();
+        let sig_bytes = self.inner.to_bytes();
         let sig_bytes = sig_bytes.deref();
         dbg!(sig_bytes);
         serializer.serialize_bytes(sig_bytes)
@@ -126,7 +121,7 @@ impl<'de> serde::de::Visitor<'de> for SignatureVisitor {
         E: serde::de::Error,
     {
         EcdsaSignature::from_slice(v)
-            .map(|sig| Signature { signature: sig })
+            .map(|sig| Signature { inner: sig })
             .map_err(|e| E::custom(""))
     }
 
@@ -144,55 +139,84 @@ impl<'de> serde::Deserialize<'de> for Signature {
 
 impl Signature {
     pub fn as_bytes(&self) -> Vec<u8> {
-        self.signature.to_der().to_bytes().to_vec()
+        self.inner.to_der().to_bytes().to_vec()
     }
 
     pub fn as_hex(&self) -> String {
-        hex::encode(self.signature.to_der().to_bytes())
+        hex::encode(self.inner.to_der().to_bytes())
     }
 }
 
-#[test]
-fn serd_signature() {
-    use super::block::Block;
-    let b = Block::new("prev_hash".into(), 0, 0, vec![]);
-    let encoded_b = &b.encode().unwrap();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::block::Block;
 
-    let private_key = PrivateKey::generate().unwrap();
-    let signature = private_key.sign(&encoded_b).unwrap();
+    #[test]
+    fn serd_signature() {
+        let b = Block::new("prev_hash".into(), 0, 0, vec![]);
+        let encoded_b = &b.encode().unwrap();
 
-    let ser = bincode::serialize(&signature).unwrap();
-    let de: Signature = bincode::deserialize(ser.as_slice()).unwrap();
+        let private_key = PrivateKey::generate().unwrap();
+        let signature = private_key.sign(&encoded_b).unwrap();
 
-    let last3_ser = &ser[ser.len() - 3..ser.len()];
-    let last3_after_ser: &Vec<u8> = &bincode::serialize(&de)
-        .unwrap()
-        .into_iter()
-        .rev()
-        .take(3)
-        .rev()
-        .collect();
+        let ser = bincode::serialize(&signature).unwrap();
+        let de: Signature = bincode::deserialize(ser.as_slice()).unwrap();
 
-    // assert: last 3 bytes, should all match.
-    assert!(last3_ser == last3_after_ser);
+        let last3_ser = &ser[ser.len() - 3..ser.len()];
+        let last3_after_ser: &Vec<u8> = &bincode::serialize(&de)
+            .unwrap()
+            .into_iter()
+            .rev()
+            .take(3)
+            .rev()
+            .collect();
 
-    // assert: after serd signature is the same
-    let pubk = private_key.public_key();
-    let is_valid = pubk.verify(&de, &encoded_b);
-    assert!(is_valid.is_ok())
-}
+        // assert: last 3 bytes, should all match.
+        assert!(last3_ser == last3_after_ser);
 
-#[test]
-fn sign_block() {
-    use super::block::Block;
-    let b = Block::new("prev_hash".into(), 0, 0, vec![]);
-    let encoded_b = &b.encode().unwrap();
+        // assert: after serd signature is the same
+        let pubk = private_key.public_key();
+        let is_valid = pubk.verify(&de, &encoded_b);
+        assert!(is_valid.is_ok())
+    }
 
-    let private_key = PrivateKey::generate().unwrap();
-    let signature = private_key.sign(&encoded_b).unwrap();
-    assert_eq!(signature.as_bytes().is_empty(), false);
+    #[test]
+    fn poc_recv_key() {
+        let b = Block::new("prev_hash".into(), 0, 0, vec![]);
+        let encoded_b = &b.encode().unwrap();
 
-    let public_key = private_key.public_key();
-    let result = public_key.verify(&signature, &encoded_b);
-    assert!(result.is_ok());
+        let private_key = PrivateKey::generate().unwrap();
+        let signature = private_key.sign(&encoded_b).unwrap();
+
+        let recid = RecoveryId::try_from(1u8); // 0, 1 work
+        let recovered_key = VerifyingKey::recover_from_msg(
+            &encoded_b.as_slice()[..],
+            &signature.inner,
+            recid.unwrap(),
+        );
+        if let Err(ref e) = recovered_key {
+            dbg!(&e);
+            assert!(false)
+        }
+
+        let valid = recovered_key
+            .unwrap()
+            .verify(&encoded_b[..], &signature.inner);
+        assert!(valid.is_ok());
+    }
+
+    #[test]
+    fn sign_block() {
+        let b = Block::new("prev_hash".into(), 0, 0, vec![]);
+        let encoded_b = &b.encode().unwrap();
+
+        let private_key = PrivateKey::generate().unwrap();
+        let signature = private_key.sign(&encoded_b).unwrap();
+        assert_eq!(signature.as_bytes().is_empty(), false);
+
+        let public_key = private_key.public_key();
+        let result = public_key.verify(&signature, &encoded_b);
+        assert!(result.is_ok());
+    }
 }
