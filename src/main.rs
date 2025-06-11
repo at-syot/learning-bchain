@@ -1,6 +1,9 @@
-#![allow(unused_must_use, dead_code)]
+#![allow(unused_must_use, dead_code, unused_variables)]
+mod core;
+mod network;
+mod p2p_network;
 
-// use core::block_chain::BlockChain;
+use core::block_chain::BlockChain;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use tokio::io::BufReader;
@@ -26,9 +29,21 @@ fn old_main() {
     // bc.inspect();
 }
 
+// TODO:
+// - create test network layer
+//   features:
+//      save connection to connnection pool (node pool),
+//      sending message
+
+type DB = Arc<Mutex<HashMap<String, String>>>;
+
 #[tokio::main]
 async fn main() {
-    let db: Arc<Mutex<HashMap<String, String>>> = Arc::new(Mutex::new(HashMap::new()));
+    network::test_accepting_conn().await;
+}
+
+async fn old_main_0() {
+    let db: DB = Arc::new(Mutex::new(HashMap::new()));
     db.lock()
         .unwrap()
         .insert("foo".to_string(), "1".to_string());
@@ -37,17 +52,18 @@ async fn main() {
     let listener = TcpListener::bind(server_addr).await.unwrap();
     let listener_arc = Arc::new(listener);
 
-    let (tx, mut rx) = mpsc::channel(32);
+    let (otx, mut orx) = oneshot::channel::<i32>();
     let listener_joinhandle = tokio::spawn(async move {
         loop {
             tokio::select! {
-                biased;
-                _ = rx.recv() => {
-                  eprintln!(
-                      "final db's value: {:?}",
-                      db.clone().lock().unwrap().get("foo".into()).unwrap()
-                  );
-                  break;
+                received = &mut orx => {
+                    if let Ok(i) = received {
+                        println!(
+                            "final db's value: {:?}",
+                            db.clone().lock().unwrap().get("foo".into()).unwrap()
+                        );
+                    }
+                    break;
                 },
                 result = listener_arc.accept() => {
                     match result {
@@ -79,7 +95,7 @@ async fn main() {
         Ok(_) => {
             println!("after joined");
             std::thread::sleep(std::time::Duration::from_secs(1));
-            if let Err(e) = tx.send(()).await {
+            if let Err(e) = otx.send(0) {
                 eprintln!("unable to stop the cleint {}", e);
             }
             println!("client gracfully stopped.")
@@ -95,7 +111,7 @@ async fn process(socket: &mut TcpStream, db: Arc<Mutex<HashMap<String, String>>>
     let _ = socket.read(&mut buff).await;
 
     let trimmed_bytes: Vec<u8> = buff.iter().filter(|&&b| b != 0).cloned().collect();
-    let inbound_raw = String::from_utf8(trimmed_bytes).unwrap();
+    let inbound_raw: String = String::from_utf8(trimmed_bytes).unwrap();
 
     // formatting
     let command_raw = inbound_raw.split("\r\n").last().unwrap().to_string();

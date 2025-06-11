@@ -1,13 +1,17 @@
 use super::cyphers::{Encoder, Signature};
 use serde::{Deserialize, Serialize};
 
-// TODO:
-// - generate wallet address from public key
-// - create & sign transaction [trx-data, trx-signature]
-// - POC: public key recovery from singnature
-
+// Miles stone
 // creating transaction
 // wallet -> create trx -> send to blockchain -> boardcasting to all nodes
+
+// TODO:
+// - generate wallet address from public key: DONE
+// - create & sign transaction [trx-data, trx-signature]: DONE
+// - POC: public key recovery from singnature: DONE
+//
+// DOING
+// - blockchain network
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TransactionData {
