@@ -1,7 +1,7 @@
 #![allow(unused_must_use, dead_code, unused_variables)]
 mod core;
 mod network;
-mod p2p_network;
+mod p2p;
 
 use core::block_chain::BlockChain;
 use std::collections::HashMap;
@@ -29,18 +29,10 @@ fn old_main() {
     // bc.inspect();
 }
 
-// TODO:
-// - create test network layer
-//   features:
-//      save connection to connnection pool (node pool),
-//      sending message
-
 type DB = Arc<Mutex<HashMap<String, String>>>;
 
 #[tokio::main]
-async fn main() {
-    network::test_accepting_conn().await;
-}
+async fn main() {}
 
 async fn old_main_0() {
     let db: DB = Arc::new(Mutex::new(HashMap::new()));

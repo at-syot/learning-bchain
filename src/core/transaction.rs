@@ -1,5 +1,4 @@
-use super::cyphers::{Encoder, Signature};
-use super::wallet::Wallet;
+use super::cyphers::{Decoder, Encoder, Signature};
 use serde::{Deserialize, Serialize};
 
 // Transaction struct
@@ -27,9 +26,22 @@ struct TransactionData {
 pub struct Transaction {
     pub trx_id: String,
     pub data: Vec<u8>,
-    pub signature: Signature,
+    pub signature: Option<Signature>,
 }
 
+impl Encoder for Transaction {
+    fn encode(&self) -> Result<Vec<u8>, String> {
+        bincode::serialize(self).map_err(|e| e.to_string())
+    }
+}
+
+impl Decoder for Transaction {
+    fn decode(&self, encoded: &Vec<u8>) -> Result<Box<Self>, String> {
+        bincode::deserialize(&encoded).map_err(|e| e.to_string())
+    }
+}
+
+#[derive(Debug)]
 pub enum TxBuilderErr {
     RequiredInputs,
     RequiredOutputs,
@@ -69,7 +81,7 @@ impl TxBuilder {
         self
     }
 
-    pub fn sign(self, wallet: &Wallet) -> Result<Transaction, TxBuilderErr> {
+    pub fn build(self) -> Result<Transaction, TxBuilderErr> {
         if self.inputs.is_none() {
             return Err(TxBuilderErr::RequiredInputs);
         }
@@ -86,21 +98,10 @@ impl TxBuilder {
         };
         let encoded_tx_data =
             bincode::serialize(&tx_data).map_err(|_| TxBuilderErr::SerializeFail)?;
-        let tx_sig = wallet
-            .sign_data(encoded_tx_data.as_slice())
-            .map_err(|_| TxBuilderErr::SignTxFail)?;
-
         Ok(Transaction {
             trx_id: String::new(),
             data: encoded_tx_data,
-            signature: tx_sig,
+            signature: None,
         })
-    }
-}
-
-impl Encoder for Transaction {
-    fn encode(&self) -> Result<Vec<u8>, String> {
-        // bincode::serialize(self).map_err(|e| e.to_string())
-        Ok(vec![])
     }
 }

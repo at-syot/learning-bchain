@@ -1,5 +1,5 @@
 use super::block::Block;
-use super::transaction::Transaction;
+use super::transaction::{Transaction, TxBuilder};
 
 const DIFFICULTY: u8 = 3;
 const MINNING_SENDER: &'static str = "blockchain";
@@ -54,10 +54,14 @@ impl BlockChain {
     pub fn add_transaction(
         &mut self,
         sender_addr: String,
-        recipient_addr: String,
+        receiver_addr: String,
         value: f64,
     ) -> Option<&Transaction> {
-        let tx = Transaction::new(sender_addr, recipient_addr, value);
+        // temporary: using expect
+        let tx = TxBuilder::new(sender_addr, receiver_addr, value)
+            .build()
+            .expect("");
+
         self.transaction_pool.push(tx);
         self.transaction_pool.last()
     }
@@ -120,23 +124,41 @@ impl BlockChain {
     }
 }
 
-#[test]
-fn test_is_valid() {
-    let mut bc = BlockChain::new();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-    // create block 1
-    let genesis_hash = bc.latest_block().unwrap().hash();
-    let block_1 = bc.create_block(genesis_hash, 0).unwrap();
+    #[test]
+    fn utxo() {
+        // ## sending money A(sender)->B(receiver) : flow
+        // A wallet: create trx
+        // push trx to blockchain's network
+        // dedicate node||peer to basic verify the trx [trx's structure, signature, double spending(trx_id is exist?)]
+        //    if trx is valid -> broadcast trx to all peers
+        //    if trx isn't valid -> reject trx
+        // peers help verify&confirm that trx :: minimum peers confirmation (where is that come from?)
 
-    // create block 2
-    let block_1_hash = block_1.hash();
-    let block_2 = bc.create_block(block_1_hash, 1).unwrap();
-    let block_2_hash = block_2.hash();
+        // balance come from :: previous
+    }
 
-    assert!(&bc.is_valid());
+    #[test]
+    fn test_is_valid() {
+        let mut bc = BlockChain::new();
 
-    bc.block_nth(1).unwrap().header.time_stamp = chrono::Utc::now().timestamp();
-    bc.block_nth(1).unwrap().header.nonce = 90;
-    println!("\n\n-----------\n\n");
-    assert_eq!(&bc.is_valid(), &false);
+        // create block 1
+        let genesis_hash = bc.latest_block().unwrap().hash();
+        let block_1 = bc.create_block(genesis_hash, 0).unwrap();
+
+        // create block 2
+        let block_1_hash = block_1.hash();
+        let block_2 = bc.create_block(block_1_hash, 1).unwrap();
+        let block_2_hash = block_2.hash();
+
+        assert!(&bc.is_valid());
+
+        bc.block_nth(1).unwrap().header.time_stamp = chrono::Utc::now().timestamp();
+        bc.block_nth(1).unwrap().header.nonce = 90;
+        println!("\n\n-----------\n\n");
+        assert_eq!(&bc.is_valid(), &false);
+    }
 }

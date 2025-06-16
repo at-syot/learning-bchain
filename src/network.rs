@@ -1,4 +1,3 @@
-use k256::pkcs8::der::Decode;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncReadExt;
 use tokio::net::{TcpListener, TcpStream};
@@ -133,7 +132,6 @@ mod tests {
     async fn p2p() {
         let p2p_handle = tokio::spawn(async { p2p_network().await });
 
-        // TODO:
         // - spawn some connected tcpstream(s)
         // - broadcast msg to all connected
         for i in 0..5 {
@@ -148,7 +146,6 @@ mod tests {
             });
         }
 
-        // DOING: sending broadcast msg
         // - connect
         // - create bytes of TcpMessage
         // - send the bytes to socket

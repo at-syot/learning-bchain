@@ -8,6 +8,7 @@ pub trait Encoder {
     fn encode(&self) -> Result<Vec<u8>, String>;
 }
 
+// TODO: remove this thread. it doesn't make any sense!
 pub trait Decoder {
     fn decode(&self, encoded: &Vec<u8>) -> Result<Box<Self>, String>;
 }
@@ -124,7 +125,6 @@ impl<'de> serde::de::Visitor<'de> for SignatureVisitor {
             .map(|sig| Signature { inner: sig })
             .map_err(|e| E::custom(""))
     }
-
     // Remark: maybe able to deserialize json, in-case serde::json
 }
 

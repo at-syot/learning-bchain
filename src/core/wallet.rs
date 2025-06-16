@@ -1,5 +1,5 @@
-use super::cyphers::{Encoder, PrivateKey, PublicKey, Signature};
-use super::transaction::Transaction;
+use super::cyphers::{PrivateKey, PublicKey, Signature};
+use super::transaction::{TxBuilder, TxBuilderResult};
 use k256::ecdsa::Error as EcdsaErr;
 
 #[derive(Debug)]
@@ -28,43 +28,63 @@ impl Wallet {
         })
     }
 
-    pub fn create_transaction(&self, recipient_addr: String, value: f64) -> Transaction {
-        Transaction::new(self.address.clone(), recipient_addr, value)
+    // TODO: creating transaction
+    // - request blockchain history tx of given wallet's address (UTXO input)
+    // - compute trx outputs
+    // - inject inputs, outputs when creating tx
+    // - sign tx
+    // ### DONE ### creating transaction
+    pub fn create_transaction(&self, receiver_addr: String, value: f64) -> TxBuilderResult {
+        TxBuilder::new(self.address.clone(), receiver_addr, value)
+            .inputs(vec![])
+            .outputs(vec![])
+            .build()
     }
 
-    pub fn sign_transaction(&self, trx: &mut Transaction) -> Result<(), EcdsaErr> {
-        let trx_signature = self.private_key.sign(&trx.data)?;
-        trx.signature = Some(trx_signature);
-        Ok(())
+    pub fn sign_data(&self, data: &[u8]) -> Result<Signature, EcdsaErr> {
+        self.private_key.sign(&data)
     }
 }
 
-// Test:
-// - wallet successfully sign trx
-// - signed trx can safe & correctly serd to bytes
-// - signed trx is still correct in both before and after serd
-#[test]
-fn wallet() {
-    let w = Wallet::new(vec![]).unwrap();
-    let mut trx = w.create_transaction("recv_hex".to_string(), 1.0);
-    w.sign_transaction(&mut trx);
-    dbg!(&trx.signature);
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::cyphers::Encoder;
+    use crate::core::transaction::Transaction;
 
-    // Before:
-    // trx serialize: verify trx data - valid
-    let clone_signature = trx.signature.clone();
-    let valid = w
-        .public_key
-        .verify(&clone_signature.unwrap(), &trx.data[..]);
-    assert!(valid.is_ok());
+    // give a better test name.
+    #[test]
+    fn wallet() {
+        let w = Wallet::new(vec![]).unwrap();
+        let trx_result = w.create_transaction("recv_hex".to_string(), 1.0);
+        dbg!(&trx_result);
+        assert!(trx_result.is_ok());
 
-    // After:
-    // - trx serialize then deserialize back to Transaction struct (is trx's data valid ?)
-    let clone_trx = trx.clone();
-    let ser_trx = bincode::serialize(&clone_trx).expect("ser_trx");
-    let de_trx: Transaction = bincode::deserialize(&ser_trx.as_slice()).expect("de_trx");
-    let after_valid = w
-        .public_key
-        .verify(&de_trx.signature.unwrap(), &de_trx.data);
-    assert!(after_valid.is_ok());
+        let mut trx = trx_result.unwrap();
+        let signing_result = w.sign_data(&mut trx.data.as_slice());
+        dbg!(&signing_result);
+        assert!(signing_result.is_ok());
+
+        trx.signature = Some(signing_result.unwrap());
+
+        // Before:
+        // trx serialize: verify trx data - valid
+        let clone_signature = trx.signature.clone();
+        let valid = w
+            .public_key
+            .verify(&clone_signature.unwrap(), &trx.data[..]);
+        assert!(valid.is_ok());
+
+        // After:
+        // - trx serialize then deserialize back to Transaction struct (is trx's data valid ?)
+        let clone_trx = trx.clone();
+        let ser_trx_result = clone_trx.encode();
+        assert!(ser_trx_result.is_ok());
+
+        let de_trx: Transaction = bincode::deserialize(&ser_trx_result.unwrap()).expect("de_trx");
+        let after_valid = w
+            .public_key
+            .verify(&de_trx.signature.unwrap(), &de_trx.data);
+        assert!(after_valid.is_ok());
+    }
 }
