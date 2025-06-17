@@ -1,29 +1,44 @@
+use crate::core::block_chain::BlockChain;
 use serde::{Deserialize, Serialize};
-use tokio::io::AsyncReadExt;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::sync::{Arc, Mutex};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, oneshot};
 
-const LOCAL: &str = "127.0.0.1:8080";
+const LOCAL: &str = "0.0.0.0:4321";
 
+// TODO: add network to chain interactions
+
+// nodes -> network <-> chain { tx_of_addr }
 #[derive(Clone, Serialize, Deserialize, Debug)]
-enum TcpMessageTypes {
-    Producer,
-    Consumer,
+enum MsgEvent {
+    PushTrx { addr: String, tx_bytes: Vec<u8> }, // 4
+    TxsOfAddr { addr: String },                  // 1
+    IsKnownAddr { addr: String },                // 2
+    RegisterMinner { addr: String },             // 3
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug)]
-struct TcpMessage {
-    message_type: TcpMessageTypes,
-    content: String,
+enum MsgPropagation {
+    Broadcast,
+    ToChain,
 }
 
-type MessageTx = broadcast::Sender<TcpMessage>;
-type MessageRecv = broadcast::Receiver<TcpMessage>;
+#[derive(Clone, Serialize, Deserialize, Debug)]
+struct NetworkMsg {
+    event: MsgEvent,
+    propagation: MsgPropagation,
+}
+
+type MessageTx = broadcast::Sender<NetworkMsg>;
+type MessageRecv = broadcast::Receiver<NetworkMsg>;
 struct SocketHandler {
     client_id: u8,
     socket: TcpStream,
     producer: MessageTx,
     consumer: MessageRecv,
+    shared_block_chain: Arc<Mutex<BlockChain>>,
 }
 
 impl SocketHandler {
@@ -32,26 +47,28 @@ impl SocketHandler {
         socket: TcpStream,
         producer: MessageTx,
         consumer: MessageRecv,
+        shared_block_chain: Arc<Mutex<BlockChain>>,
     ) -> Self {
         SocketHandler {
             client_id,
             socket,
             producer,
             consumer,
+            shared_block_chain,
         }
     }
 
     pub async fn process(&mut self) {
-        eprintln!("process:cid {}", self.client_id);
+        println!("process:cid {}", self.client_id);
         let (mut rd, _) = self.socket.split();
-        let mut buf = [0u8; 64];
+        let mut buf = [0u8; 256];
 
         loop {
             tokio::select! {
                 rd_result = rd.read(&mut buf) => {
                     match rd_result {
                         Err(_) => {
-                            eprintln!("process:bytes {}, cid {}", buf.len(), self.client_id);
+                            println!("process:bytes {}, cid {}", buf.len(), self.client_id);
                             break;
                         }
                         Ok(0) => {
@@ -59,12 +76,17 @@ impl SocketHandler {
                             break;
                         }
                         Ok(_) => {
-                            let tcp_msg_result: bincode::Result<TcpMessage> =
-                                bincode::deserialize(&buf[..]);
-                            if let Ok(t) = tcp_msg_result {
-                                println!("process:{}:tcpmsg:send {:?}", self.client_id, t);
-                                self.producer.send(t);
-                            }
+                            println!("process:read");
+                            let msg_result: bincode::Result<NetworkMsg> = bincode::deserialize(&buf[..]);
+                            if let Err(e) = msg_result {
+                                eprintln!("process:tcp_msg_result:err {:?}", e);
+                                break;
+                            };
+                            self.process_msg(msg_result.unwrap()).await;
+
+                            // Broadcasting
+                            // println!("process:{}:tcpmsg:send {:?}", self.client_id, msg);
+                            // self.producer.send(t);
                             break;
                         }
                     }
@@ -75,15 +97,31 @@ impl SocketHandler {
             }
         }
     }
+
+    pub async fn process_msg(&mut self, msg: NetworkMsg) {
+        let (_, mut w) = self.socket.split();
+
+        println!("process_msg:got {:?}", msg);
+        match msg.event {
+            MsgEvent::TxsOfAddr { addr } => {
+                let ser_txs = {
+                    let shared_block_chain = self.shared_block_chain.lock().unwrap();
+                    let addr_txs = shared_block_chain.txs_of_addr(addr);
+                    bincode::serialize(&addr_txs[..]).unwrap()
+                };
+                w.write_all(&ser_txs[..]).await;
+                w.flush().await;
+                println!("process_msg:ser_txs:sent");
+            }
+            _ => {}
+        }
+    }
 }
 
-async fn p2p_network() {
-    use std::sync::atomic::{AtomicU8, Ordering};
-    use std::sync::Arc;
-
+async fn network(shared_block_chain: Arc<Mutex<BlockChain>>) {
     let (tx_term, mut rx_term) = oneshot::channel::<u8>();
     let listener = TcpListener::bind(LOCAL).await.unwrap();
-    let (msg_tx, _) = broadcast::channel::<TcpMessage>(16);
+    let (msg_tx, _) = broadcast::channel::<NetworkMsg>(16);
     let client_id = Arc::new(AtomicU8::new(0));
 
     let server_loop = async {
@@ -93,13 +131,19 @@ async fn p2p_network() {
                 conn_result = listener.accept() => {
                     if let Err(ref e) = conn_result {}
                     let (socket, addr) = conn_result.unwrap();
+                    let shared_block_chain = shared_block_chain.clone();
                     let client_id = client_id.clone();
                     let loaded_client_id = client_id.load(Ordering::Relaxed);
                     let clone_msg_tx = msg_tx.clone();
                     let msg_recv = clone_msg_tx.subscribe();
 
                     tokio::spawn(async move {
-                        let mut handler = SocketHandler::new(loaded_client_id, socket, clone_msg_tx, msg_recv);
+                        let mut handler = SocketHandler::new(
+                            loaded_client_id,
+                            socket,
+                            clone_msg_tx,
+                            msg_recv,
+                            shared_block_chain);
                         handler.process().await;
                     });
 
@@ -113,7 +157,7 @@ async fn p2p_network() {
     tokio::select! {
         _ = server_loop => {}
         _ = tokio::signal::ctrl_c() => {
-            dbg!("stoping server.");
+            println!("stoping server.");
             tx_term.send(0);
         }
     };
@@ -122,15 +166,86 @@ async fn p2p_network() {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
+    use crate::core::transaction::{Transaction, TxBuilder};
     use tokio::{
         io::AsyncWriteExt,
         time::{self, Duration},
     };
 
     #[tokio::test]
-    async fn p2p() {
-        let p2p_handle = tokio::spawn(async { p2p_network().await });
+    async fn txs_of_addr() {
+        // Steps #
+        // Chain -> cons tx -> add to chain's mempool, -> minning -> add block: DONE
+        // Network -> send msg::tx_of_addr -> Chain : iterate blocks to find txs of given addr
+        let a = "A".to_string();
+        let b = "B".to_string();
+        let chain = Arc::new(Mutex::new(BlockChain::new()));
+
+        let tx1 = TxBuilder::new(a.clone(), b.clone(), 1.0)
+            .inputs(vec![])
+            .outputs(vec![])
+            .build()
+            .expect("unable to create tx-1");
+        let tx2 = TxBuilder::new(b.clone(), a.clone(), 0.5)
+            .inputs(vec![])
+            .outputs(vec![])
+            .build()
+            .expect("unable to create tx-2");
+
+        chain.lock().unwrap().add_transaction(tx1);
+        chain.lock().unwrap().add_transaction(tx2);
+        chain.lock().unwrap().minning();
+
+        tokio::spawn(async move {
+            time::sleep(Duration::from_millis(500)).await;
+            let mut socket = TcpStream::connect(LOCAL).await.unwrap();
+            let (mut r, mut w) = socket.split();
+
+            let read_fu = async move {
+                println!("read_fu:parking");
+                let mut buf = [0u8; 1024];
+                let read_result = r.read(&mut buf).await;
+                if let Ok(_) = read_result {
+                    let addr_txs: Vec<Transaction> = bincode::deserialize(&buf).unwrap();
+                    println!("read_fu:addr_txs {:?}", addr_txs);
+                };
+            };
+
+            let send_fu = async move {
+                // Network -> send msg::tx_of_addr -> Chain : iterate blocks to find txs of given addr
+                let msg = NetworkMsg {
+                    event: MsgEvent::TxsOfAddr { addr: a.clone() },
+                    propagation: MsgPropagation::ToChain,
+                };
+                let ser_msg_result = bincode::serialize(&msg);
+                assert!(ser_msg_result.is_ok());
+
+                time::sleep(Duration::from_millis(500)).await;
+
+                println!("send_fu:send");
+                let ser_msg = ser_msg_result.unwrap();
+                w.write_all(&ser_msg[..]).await;
+                w.flush().await;
+
+                // after flush msg: give some time for reader
+                time::sleep(Duration::from_millis(500)).await;
+            };
+
+            let a = tokio::select! {
+               _ = read_fu => {},
+               _ = send_fu => {}
+            };
+        });
+
+        network(chain).await
+
+        // assert!(false)
+    }
+
+    #[tokio::test] // MsgEvent::PushTrx
+    async fn broadcast_trx() {
+        let chain = Arc::new(Mutex::new(BlockChain::new()));
+        let network_handle = tokio::spawn(async { network(chain).await });
 
         // - spawn some connected tcpstream(s)
         // - broadcast msg to all connected
@@ -154,9 +269,12 @@ mod tests {
             let (_, mut wr) = socket.split();
             eprintln!("producer:connect");
 
-            let msg = TcpMessage {
-                message_type: TcpMessageTypes::Producer,
-                content: "to all!!!".to_string(),
+            let msg = NetworkMsg {
+                propagation: MsgPropagation::Broadcast,
+                event: MsgEvent::PushTrx {
+                    addr: "sender".to_string(),
+                    tx_bytes: "trx_bytes".to_string().as_bytes().to_vec(),
+                },
             };
             let msg_bytes = bincode::serialize(&msg).unwrap();
 
@@ -173,8 +291,7 @@ mod tests {
             println!("send message:done");
         });
 
-        // handle.await;
-        p2p_handle.await;
+        network_handle.await;
         assert!(false);
     }
 }

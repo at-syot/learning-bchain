@@ -1,5 +1,5 @@
 use super::block::Block;
-use super::transaction::{Transaction, TxBuilder};
+use super::transaction::{Transaction, TransactionData};
 
 const DIFFICULTY: u8 = 3;
 const MINNING_SENDER: &'static str = "blockchain";
@@ -7,8 +7,8 @@ const MINNING_REWARD: f64 = 1.0;
 
 #[derive(Debug)]
 pub struct BlockChain {
-    pub transaction_pool: Vec<Transaction>, // pending trxs
-    pub chain: Vec<Block>,                  // should be ref with lifetime specified
+    pub mem_pool: Vec<Transaction>, // pending trxs
+    pub chain: Vec<Block>,          // should be ref with lifetime specified
     pub block_chain_address: Option<String>,
 }
 
@@ -20,24 +20,24 @@ impl BlockChain {
 
         BlockChain {
             chain: vec![b],
-            transaction_pool: vec![],
+            mem_pool: vec![],
             block_chain_address: None,
         }
     }
 
     pub fn create_block(&mut self, prev_hash: String, nonce: u64) -> Option<&Block> {
-        let mut new_block = Block::new(
+        let mut b = Block::new(
             prev_hash,
             nonce,
             self.chain.len() as u64,
-            self.transaction_pool.to_vec(),
+            self.mem_pool.to_vec(),
         );
-        new_block.gen_hash();
+        b.gen_hash();
 
-        self.chain.push(new_block);
+        self.chain.push(b);
 
-        // empty the transaction_pool
-        self.transaction_pool = vec![];
+        // empty the mem_pool
+        self.mem_pool = vec![];
 
         self.chain.last()
     }
@@ -51,19 +51,52 @@ impl BlockChain {
         self.chain.iter_mut().nth(nth)
     }
 
-    pub fn add_transaction(
-        &mut self,
-        sender_addr: String,
-        receiver_addr: String,
-        value: f64,
-    ) -> Option<&Transaction> {
-        // temporary: using expect
-        let tx = TxBuilder::new(sender_addr, receiver_addr, value)
-            .build()
-            .expect("");
+    pub fn add_transaction(&mut self, tx: Transaction) -> Option<&Transaction> {
+        self.mem_pool.push(tx);
+        self.mem_pool.last()
+    }
 
-        self.transaction_pool.push(tx);
-        self.transaction_pool.last()
+    pub fn txs_of_addr(&self, addr: String) -> Vec<Transaction> {
+        // let mut balance = 0f64;
+        // let mut spended = 0f64;
+        // let mut received = 0f64;
+        // 'chain_loop: for b in &self.chain {
+        //     for tx in &b.transactions {
+        //         let txdata_de_result = bincode::deserialize::<TransactionData>(&tx.data[..]);
+        //         if let Err(_) = txdata_de_result {
+        //             break 'chain_loop;
+        //         }
+        //
+        //         let txdata = txdata_de_result.unwrap();
+        //         if addr == txdata.receiver_addr {
+        //             // have received money
+        //             received += txdata.value;
+        //         }
+        //         if addr == txdata.sender_addr {
+        //             // have spended money
+        //             spended += txdata.value
+        //         }
+        //     }
+        // }
+        //
+        // balance = received - spended;
+
+        let mut addr_txs: Vec<Transaction> = vec![];
+        'chain_loop: for b in &self.chain {
+            for tx in &b.transactions {
+                let txdata_de_result = bincode::deserialize::<TransactionData>(&tx.data[..]);
+                if let Err(_) = txdata_de_result {
+                    break 'chain_loop;
+                }
+
+                let txdata = txdata_de_result.unwrap();
+                if txdata.sender_addr.eq(&addr) || txdata.receiver_addr.eq(&addr) {
+                    addr_txs.push(tx.clone());
+                }
+            }
+        }
+
+        addr_txs
     }
 
     pub fn valid_proof(&self, adding_block: &mut Block) -> bool {
@@ -81,7 +114,7 @@ impl BlockChain {
         let mut nonce = 0;
         loop {
             let prev_hash = self.latest_block().unwrap().hash();
-            let transactions = self.transaction_pool.to_vec();
+            let transactions = self.mem_pool.to_vec();
             let block_height = self.chain.len();
             let mut adding_block = Block::new(prev_hash, nonce, block_height as u64, transactions);
             if self.valid_proof(&mut adding_block) {
@@ -93,11 +126,11 @@ impl BlockChain {
     }
 
     pub fn minning(&mut self) {
-        self.add_transaction(
-            MINNING_SENDER.into(),
-            self.block_chain_address.as_ref().unwrap().clone(),
-            MINNING_REWARD,
-        );
+        // self.add_transaction(
+        //     MINNING_SENDER.into(),
+        //     self.block_chain_address.as_ref().unwrap().clone(),
+        //     MINNING_REWARD,
+        // );
 
         let prev_hash = self.latest_block().unwrap().hash();
         let nonce = self.proof_of_work();
@@ -113,11 +146,11 @@ impl BlockChain {
     }
 
     pub fn inspect(&self) {
-        println!("BlockChain {:?}", self);
+        // println!("BlockChain {:?}", self);
         for (i, block) in self.chain.iter().enumerate() {
             println!("{} Block {} {}", "#".repeat(25), i, "#".repeat(25));
             println!("-> {:?}", block);
-            println!("-> {:?}", self.transaction_pool);
+            println!("-> {:?}", self.mem_pool);
             println!("{}", "*".repeat(30));
             println!("\n\n");
         }
